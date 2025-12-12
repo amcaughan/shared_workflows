@@ -1,0 +1,123 @@
+name: security-trivy
+
+on:
+  workflow_call:
+    inputs:
+      scan_path:
+        description: "Path to scan (repo root is '.')"
+        type: string
+        required: false
+        default: "."
+      trivy_version:
+        description: "Trivy version (e.g. v0.68.1). Required if cache=true."
+        type: string
+        required: false
+        default: "v0.68.1"
+      cache_trivy_binary:
+        description: "Cache Trivy binary"
+        type: boolean
+        required: false
+        default: true
+      scanners:
+        description: "Comma-separated scanners. Exclude IaC by omitting 'misconfig'."
+        type: string
+        required: false
+        default: "vuln,secret,license"
+      artifact_name:
+        description: "Artifact name for SARIF output"
+        type: string
+        required: false
+        default: "sarif-trivy"
+      sarif_filename:
+        description: "SARIF filename (within out/)"
+        type: string
+        required: false
+        default: "trivy.sarif"
+      skip_files:
+        description: "Comma-separated glob patterns to skip (optional)"
+        type: string
+        required: false
+        default: ""
+      skip_dirs:
+        description: "Comma-separated dir globs to skip (optional)"
+        type: string
+        required: false
+        default: ".git,node_modules,.terraform,.terragrunt-cache"
+      trivy_args:
+        description: "Extra args passed to trivy"
+        type: string
+        required: false
+        default: ""
+    outputs:
+      artifact_name:
+        description: "Artifact containing SARIF"
+        value: ${{ jobs.trivy.outputs.artifact_name }}
+      sarif_path:
+        description: "Path to SARIF file in the job workspace"
+        value: ${{ jobs.trivy.outputs.sarif_path }}
+
+permissions:
+  contents: read
+
+jobs:
+  trivy:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_name: ${{ steps.out.outputs.artifact_name }}
+      sarif_path: ${{ steps.out.outputs.sarif_path }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@v0.2.3
+        with:
+          version: ${{ inputs.trivy_version }}
+          cache: ${{ inputs.cache_trivy_binary }}
+
+      - name: Run Trivy (SARIF)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+
+          cmd=(trivy fs
+            --scanners "${{ inputs.scanners }}"
+            --format sarif
+            -o "out/${{ inputs.sarif_filename }}"
+          )
+
+          # Optional skips
+          if [[ -n "${{ inputs.skip_dirs }}" ]]; then
+            cmd+=(--skip-dirs "${{ inputs.skip_dirs }}")
+          fi
+          if [[ -n "${{ inputs.skip_files }}" ]]; then
+            cmd+=(--skip-files "${{ inputs.skip_files }}")
+          fi
+
+          # Target path
+          cmd+=("${{ inputs.scan_path }}")
+
+          # Any extra args (space-delimited string)
+          if [[ -n "${{ inputs.trivy_args }}" ]]; then
+            # shellcheck disable=SC2206
+            extra=(${{ inputs.trivy_args }})
+            cmd+=("${extra[@]}")
+          fi
+
+          "${cmd[@]}"
+
+      - name: Upload SARIF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: out/${{ inputs.sarif_filename }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Expose outputs
+        id: out
+        shell: bash
+        run: |
+          echo "artifact_name=${{ inputs.artifact_name }}" >> "$GITHUB_OUTPUT"
+          echo "sarif_path=out/${{ inputs.sarif_filename }}" >> "$GITHUB_OUTPUT"
