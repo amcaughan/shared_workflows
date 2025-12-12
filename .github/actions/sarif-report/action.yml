@@ -1,0 +1,26 @@
+name: "sarif-report"
+description: "Generate a minimal HTML report from one or more SARIF files"
+inputs:
+  title:
+    description: "HTML report title"
+    required: false
+    default: "Security Report"
+  sarif_glob:
+    description: "Glob for SARIF inputs (relative to workspace)"
+    required: false
+    default: "sarif/**/*.sarif"
+  out_html:
+    description: "Output HTML path"
+    required: false
+    default: "out/security-report.html"
+runs:
+  using: "composite"
+  steps:
+    - name: Generate HTML report
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 "${{ github.action_path }}/sarif_report.py" \
+          --title "${{ inputs.title }}" \
+          --out "${{ inputs.out_html }}" \
+          --glob "${{ inputs.sarif_glob }}"
