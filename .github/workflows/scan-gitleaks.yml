@@ -28,6 +28,11 @@ on:
         type: boolean
         required: false
         default: true
+      scan_history:
+        description: "If true, scan git history; if false, scan working tree only"
+        type: boolean
+        required: false
+        default: true
       gitleaks_args:
         description: "Extra args passed to gitleaks"
         type: string
@@ -72,30 +77,43 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
-
+      
           set +e
-          cmd=(gitleaks git
-            --report-format sarif
-            --report-path "out/${{ inputs.sarif_filename }}"
-            --no-banner
-          )
-
+      
+          if [[ "${{ inputs.scan_history }}" == "true" ]]; then
+            # history scan (commits)
+            cmd=(gitleaks git
+              --report-format sarif
+              --report-path "out/${{ inputs.sarif_filename }}"
+              --no-banner
+            )
+          else
+            # working tree scan only (no git history)
+            cmd=(gitleaks detect
+              --no-git
+              --source .
+              --report-format sarif
+              --report-path "out/${{ inputs.sarif_filename }}"
+              --no-banner
+            )
+          fi
+      
           if [[ "${{ inputs.redact }}" == "true" ]]; then
             cmd+=(--redact)
           fi
-
+      
           if [[ -n "${{ inputs.gitleaks_args }}" ]]; then
-            # shellcheck disable=SC2206
             extra=(${{ inputs.gitleaks_args }})
             cmd+=("${extra[@]}")
           fi
-
+      
           "${cmd[@]}"
           rc=$?
           set -e
-
+      
           echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
-
+      
+      
       - name: Upload SARIF artifact
         uses: actions/upload-artifact@v4
         with:
