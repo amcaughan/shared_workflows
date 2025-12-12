@@ -63,7 +63,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          go install github.com/gitleaks/gitleaks/v8@v${{ inputs.gitleaks_version }}
+          go install github.com/zricethezav/gitleaks/v8@v${{ inputs.gitleaks_version }}
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Run gitleaks (SARIF)

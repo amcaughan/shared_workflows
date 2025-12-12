@@ -57,7 +57,7 @@ jobs:
             bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
           else
             bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) \
-              -version "${{ inputs.actionlint_version }}"
+            "${{ inputs.actionlint_version }}"
           fi
           echo "exe=$(pwd)/actionlint" >> "$GITHUB_OUTPUT"
 

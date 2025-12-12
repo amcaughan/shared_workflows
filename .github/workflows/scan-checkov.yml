@@ -28,6 +28,11 @@ on:
         type: string
         required: false
         default: ""
+      fail_on_findings:
+        description: "Fail the job if Checkov finds violations"
+        type: boolean
+        required: false
+        default: false
     outputs:
       artifact_name:
         description: "Artifact containing SARIF"
@@ -70,13 +75,20 @@ jobs:
           pip install checkov
 
       - name: Run Checkov (SARIF)
+        id: run
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p out
+          set +e
           checkov -d "${{ inputs.scan_path }}" \
-            -o sarif \
-            --output-file-path "out/${{ inputs.sarif_filename }}" \
-            ${{ inputs.checkov_args }}
+          -o sarif \
+          --output-file-path "out/${{ inputs.sarif_filename }}" \
+          ${{ inputs.checkov_args }}
+          rc=$?
+          set -e
+          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
+
 
       - name: Upload SARIF artifact
         uses: actions/upload-artifact@v4
@@ -92,3 +104,9 @@ jobs:
         run: |
           echo "artifact_name=${{ inputs.artifact_name }}" >> "$GITHUB_OUTPUT"
           echo "sarif_path=out/${{ inputs.sarif_filename }}" >> "$GITHUB_OUTPUT"
+    
+      - name: Fail if findings (optional)
+        if: ${{ inputs.fail_on_findings }}
+        shell: bash
+        run: |
+          exit "${{ steps.run.outputs.exit_code }}"
