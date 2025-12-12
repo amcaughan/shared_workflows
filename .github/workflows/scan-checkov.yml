@@ -1,0 +1,94 @@
+name: security-checkov
+
+on:
+  workflow_call:
+    inputs:
+      scan_path:
+        description: "Path to scan (repo root is '.')"
+        type: string
+        required: false
+        default: "."
+      python_version:
+        description: "Python version for Checkov"
+        type: string
+        required: false
+        default: "3.12"
+      artifact_name:
+        description: "Artifact name for SARIF output"
+        type: string
+        required: false
+        default: "sarif-checkov"
+      sarif_filename:
+        description: "SARIF filename (within out/)"
+        type: string
+        required: false
+        default: "checkov.sarif"
+      checkov_args:
+        description: "Extra args passed to checkov"
+        type: string
+        required: false
+        default: ""
+    outputs:
+      artifact_name:
+        description: "Artifact containing SARIF"
+        value: ${{ jobs.checkov.outputs.artifact_name }}
+      sarif_path:
+        description: "Path to SARIF file in the job workspace"
+        value: ${{ jobs.checkov.outputs.sarif_path }}
+
+permissions:
+  contents: read
+
+jobs:
+  checkov:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_name: ${{ steps.out.outputs.artifact_name }}
+      sarif_path: ${{ steps.out.outputs.sarif_path }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ inputs.python_version }}-checkov
+          restore-keys: |
+            pip-${{ runner.os }}-${{ inputs.python_version }}-
+            pip-${{ runner.os }}-
+
+      - name: Install Checkov
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install checkov
+
+      - name: Run Checkov (SARIF)
+        shell: bash
+        run: |
+          mkdir -p out
+          checkov -d "${{ inputs.scan_path }}" \
+            -o sarif \
+            --output-file-path "out/${{ inputs.sarif_filename }}" \
+            ${{ inputs.checkov_args }}
+
+      - name: Upload SARIF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: out/${{ inputs.sarif_filename }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Expose outputs
+        id: out
+        shell: bash
+        run: |
+          echo "artifact_name=${{ inputs.artifact_name }}" >> "$GITHUB_OUTPUT"
+          echo "sarif_path=out/${{ inputs.sarif_filename }}" >> "$GITHUB_OUTPUT"
