@@ -1,0 +1,118 @@
+name: security-gitleaks
+
+on:
+  workflow_call:
+    inputs:
+      gitleaks_version:
+        description: "Gitleaks version to install (e.g. 8.30.0)"
+        type: string
+        required: false
+        default: "8.30.0"
+      artifact_name:
+        description: "Artifact name for SARIF output"
+        type: string
+        required: false
+        default: "sarif-gitleaks"
+      sarif_filename:
+        description: "SARIF filename (within out/)"
+        type: string
+        required: false
+        default: "gitleaks.sarif"
+      redact:
+        description: "Redact secrets in output"
+        type: boolean
+        required: false
+        default: true
+      fail_on_findings:
+        description: "Fail the job if leaks are found"
+        type: boolean
+        required: false
+        default: true
+      gitleaks_args:
+        description: "Extra args passed to gitleaks"
+        type: string
+        required: false
+        default: ""
+    outputs:
+      artifact_name:
+        value: ${{ jobs.gitleaks.outputs.artifact_name }}
+      sarif_path:
+        value: ${{ jobs.gitleaks.outputs.sarif_path }}
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_name: ${{ steps.out.outputs.artifact_name }}
+      sarif_path: ${{ steps.out.outputs.sarif_path }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go (for installing gitleaks)
+        uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+
+      - name: Install gitleaks
+        shell: bash
+        run: |
+          set -euo pipefail
+          go install github.com/gitleaks/gitleaks/v8@v${{ inputs.gitleaks_version }}
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Run gitleaks (SARIF)
+        id: run
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+
+          set +e
+          cmd=(gitleaks git
+            --report-format sarif
+            --report-path "out/${{ inputs.sarif_filename }}"
+            --no-banner
+          )
+
+          if [[ "${{ inputs.redact }}" == "true" ]]; then
+            cmd+=(--redact)
+          fi
+
+          if [[ -n "${{ inputs.gitleaks_args }}" ]]; then
+            # shellcheck disable=SC2206
+            extra=(${{ inputs.gitleaks_args }})
+            cmd+=("${extra[@]}")
+          fi
+
+          "${cmd[@]}"
+          rc=$?
+          set -e
+
+          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
+
+      - name: Upload SARIF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: out/${{ inputs.sarif_filename }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Expose outputs
+        id: out
+        shell: bash
+        run: |
+          echo "artifact_name=${{ inputs.artifact_name }}" >> "$GITHUB_OUTPUT"
+          echo "sarif_path=out/${{ inputs.sarif_filename }}" >> "$GITHUB_OUTPUT"
+
+      - name: Fail if findings (optional)
+        if: ${{ inputs.fail_on_findings }}
+        shell: bash
+        run: |
+          exit "${{ steps.run.outputs.exit_code }}"

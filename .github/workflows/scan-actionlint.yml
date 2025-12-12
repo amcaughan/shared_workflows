@@ -1,0 +1,115 @@
+name: security-actionlint
+
+on:
+  workflow_call:
+    inputs:
+      actionlint_version:
+        description: "actionlint version (e.g. 1.7.9). Use 'latest' to use the download script default."
+        type: string
+        required: false
+        default: "1.7.9"
+      artifact_name:
+        description: "Artifact name for SARIF output"
+        type: string
+        required: false
+        default: "sarif-actionlint"
+      sarif_filename:
+        description: "SARIF filename (within out/)"
+        type: string
+        required: false
+        default: "actionlint.sarif"
+      fail_on_findings:
+        description: "Fail the job if actionlint finds problems"
+        type: boolean
+        required: false
+        default: true
+      actionlint_args:
+        description: "Extra args passed to actionlint (e.g. '-shellcheck= -pyflakes=')"
+        type: string
+        required: false
+        default: ""
+    outputs:
+      artifact_name:
+        value: ${{ jobs.actionlint.outputs.artifact_name }}
+      sarif_path:
+        value: ${{ jobs.actionlint.outputs.sarif_path }}
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_name: ${{ steps.out.outputs.artifact_name }}
+      sarif_path: ${{ steps.out.outputs.sarif_path }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download actionlint
+        id: dl
+        shell: bash
+        run: |
+          set -euo pipefail
+          # actionlint's recommended download script :contentReference[oaicite:2]{index=2}
+          if [[ "${{ inputs.actionlint_version }}" == "latest" ]]; then
+            bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          else
+            bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) \
+              -version "${{ inputs.actionlint_version }}"
+          fi
+          echo "exe=$(pwd)/actionlint" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch SARIF template
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sSL \
+            -o sarif_template.txt \
+            https://raw.githubusercontent.com/rhysd/actionlint/main/testdata/format/sarif_template.txt
+
+      - name: Run actionlint (SARIF)
+        id: run
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          tmpl="$(cat sarif_template.txt)"
+
+          set +e
+          cmd=("${{ steps.dl.outputs.exe }}" -format "$tmpl" -color)
+
+          if [[ -n "${{ inputs.actionlint_args }}" ]]; then
+            # shellcheck disable=SC2206
+            extra=(${{ inputs.actionlint_args }})
+            cmd+=("${extra[@]}")
+          fi
+
+          # Run against default discovery (all workflows) :contentReference[oaicite:3]{index=3}
+          "${cmd[@]}" > "out/${{ inputs.sarif_filename }}"
+          rc=$?
+          set -e
+
+          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
+
+      - name: Upload SARIF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: out/${{ inputs.sarif_filename }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Expose outputs
+        id: out
+        shell: bash
+        run: |
+          echo "artifact_name=${{ inputs.artifact_name }}" >> "$GITHUB_OUTPUT"
+          echo "sarif_path=out/${{ inputs.sarif_filename }}" >> "$GITHUB_OUTPUT"
+
+      - name: Fail if findings (optional)
+        if: ${{ inputs.fail_on_findings }}
+        shell: bash
+        run: |
+          exit "${{ steps.run.outputs.exit_code }}"
