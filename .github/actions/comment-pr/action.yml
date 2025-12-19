@@ -37,8 +37,6 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        run: |
-        set -euo pipefail
         command -v python3 >/dev/null || {
           echo "python3 is required on the runner" >&2
           exit 1
