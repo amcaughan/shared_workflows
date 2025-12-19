@@ -1,0 +1,83 @@
+name: sarif-report
+
+on:
+  workflow_call:
+    inputs:
+      title:
+        description: "HTML report title"
+        type: string
+        required: false
+        default: "Security Report"
+
+      sarif_glob:
+        description: "Glob for SARIF files after artifact download"
+        type: string
+        required: false
+        default: "sarif/**/**/*.sarif"
+
+      out_html:
+        description: "Output HTML path"
+        type: string
+        required: false
+        default: "out/security-report.html"
+
+      report_artifact_name:
+        description: "Artifact name for generated HTML report"
+        type: string
+        required: false
+        default: "security-report"
+
+      retention_days:
+        description: "Artifact retention period"
+        type: number
+        required: false
+        default: 14
+
+      summary_open:
+        description: "Whether the Step Summary <details> is open by default"
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+
+    steps:
+      - name: Download SARIF artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: sarif
+
+      - name: Generate SARIF HTML report
+        uses: amcaughan/shared_workflows/.github/actions/sarif-report@${{ github.ref }}
+        with:
+          title: ${{ inputs.title }}
+          sarif_glob: ${{ inputs.sarif_glob }}
+          out_html: ${{ inputs.out_html }}
+
+      - name: Upload HTML report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.report_artifact_name }}
+          path: ${{ inputs.out_html }}
+          retention-days: ${{ inputs.retention_days }}
+
+      - name: Attach report to Step Summary
+        shell: bash
+        run: |
+          if [[ "${{ inputs.summary_open }}" == "true" ]]; then
+            open_attr="open"
+          else
+            open_attr=""
+          fi
+
+          {
+            echo "<details $open_attr><summary>Security report (HTML)</summary>"
+            cat "${{ inputs.out_html }}"
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
