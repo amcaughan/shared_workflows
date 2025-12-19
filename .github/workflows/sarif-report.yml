@@ -54,7 +54,7 @@ jobs:
           path: sarif
 
       - name: Generate SARIF HTML report
-        uses: amcaughan/shared_workflows/.github/actions/sarif-report@${{ github.ref }}
+        uses: amcaughan/shared_workflows/.github/actions/sarif-report@main
         with:
           title: ${{ inputs.title }}
           sarif_glob: ${{ inputs.sarif_glob }}

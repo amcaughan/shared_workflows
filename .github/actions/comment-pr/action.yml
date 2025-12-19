@@ -1,0 +1,52 @@
+name: "comment-pr"
+description: "Create or update a named comment on a pull request"
+
+inputs:
+  comment_name:
+    description: "Stable name used to find/update an existing comment (idempotency key)"
+    required: true
+
+  body:
+    description: "Comment body (markdown). Ignored if body_file is set."
+    required: false
+    default: ""
+
+  body_file:
+    description: "Path to a file containing the comment body (markdown / HTML)"
+    required: false
+    default: ""
+
+  pr_number:
+    description: "PR number override (optional). If omitted, derived from pull_request event."
+    required: false
+    default: ""
+
+  mode:
+    description: "update (default) updates existing named comment, create always creates, upsert creates or updates"
+    required: false
+    default: "upsert"
+
+  token:
+    description: "GitHub token (usually secrets.GITHUB_TOKEN)"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Create or update PR comment
+      shell: bash
+      run: |
+        set -euo pipefail
+        run: |
+        set -euo pipefail
+        command -v python3 >/dev/null || {
+          echo "python3 is required on the runner" >&2
+          exit 1
+        }
+        python3 "${{ github.action_path }}/comment_pr.py" \
+          --comment-name "${{ inputs.comment_name }}" \
+          --body "${{ inputs.body }}" \
+          --body-file "${{ inputs.body_file }}" \
+          --pr-number "${{ inputs.pr_number }}" \
+          --mode "${{ inputs.mode }}" \
+          --token "${{ inputs.token }}"
