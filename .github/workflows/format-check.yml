@@ -60,4 +60,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          terragrunt hcl format --check --terragrunt-working-dir "${{ inputs.terragrunt_working_dir }}"
+          cd "${{ inputs.terragrunt_working_dir }}"
+          terragrunt hcl format --check
