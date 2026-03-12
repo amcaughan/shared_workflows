@@ -1,0 +1,63 @@
+name: format-check
+
+on:
+  workflow_call:
+    inputs:
+      terraform_modules_dir:
+        description: "Directory containing Terraform modules to fmt-check"
+        type: string
+        required: false
+        default: "infra/terragrunt/modules"
+      terragrunt_working_dir:
+        description: "Directory containing Terragrunt HCL to fmt-check"
+        type: string
+        required: false
+        default: "infra/terragrunt"
+      terraform_version:
+        description: "Terraform version to install"
+        type: string
+        required: false
+        default: "latest"
+      terragrunt_version:
+        description: "Terragrunt version to install"
+        type: string
+        required: false
+        default: "v0.94.0"
+
+permissions:
+  contents: read
+
+jobs:
+  formatting:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ inputs.terraform_version }}
+          terraform_wrapper: false
+
+      - name: Setup Terragrunt
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/gruntwork-io/terragrunt/releases/download/${{ inputs.terragrunt_version }}/terragrunt_linux_amd64" \
+            -o /usr/local/bin/terragrunt
+          chmod +x /usr/local/bin/terragrunt
+          terragrunt --version
+
+      - name: Terraform fmt check (modules)
+        shell: bash
+        run: |
+          set -euo pipefail
+          terraform fmt -check -recursive "${{ inputs.terraform_modules_dir }}"
+
+      - name: Terragrunt hcl format check
+        shell: bash
+        run: |
+          set -euo pipefail
+          terragrunt hcl format --check --terragrunt-working-dir "${{ inputs.terragrunt_working_dir }}"
