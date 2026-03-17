@@ -1,0 +1,37 @@
+name: "terragrunt-plan-report"
+description: "Generate sanitized markdown, JSON, and HTML reports from Terraform plan JSON files"
+
+inputs:
+  title:
+    description: "Report title"
+    required: false
+    default: "Terragrunt plan report"
+  plan_index_tsv:
+    description: "TSV file containing safe_name, stack_path, and plan_json_path columns"
+    required: true
+  out_json:
+    description: "Path to write the sanitized JSON summary"
+    required: false
+    default: "out/terragrunt-plan-summary.json"
+  out_markdown:
+    description: "Path to write the markdown summary"
+    required: false
+    default: "out/terragrunt-plan-summary.md"
+  out_html:
+    description: "Path to write the HTML summary"
+    required: false
+    default: "out/terragrunt-plan-summary.html"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Generate Terragrunt plan report
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 "${{ github.action_path }}/terragrunt_plan_report.py" \
+          --title "${{ inputs.title }}" \
+          --plan-index-tsv "${{ inputs.plan_index_tsv }}" \
+          --out-json "${{ inputs.out_json }}" \
+          --out-markdown "${{ inputs.out_markdown }}" \
+          --out-html "${{ inputs.out_html }}"

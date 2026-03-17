@@ -1,0 +1,185 @@
+name: terragrunt-plan
+
+on:
+  workflow_call:
+    inputs:
+      terragrunt_working_dir:
+        description: "Base directory containing the Terragrunt stacks"
+        type: string
+        required: false
+        default: "infra/terragrunt"
+      stack_paths:
+        description: "Newline-delimited stack paths relative to terragrunt_working_dir"
+        type: string
+        required: true
+      report_title:
+        description: "Human-readable report title"
+        type: string
+        required: false
+        default: "Terragrunt plan report"
+      report_artifact_name:
+        description: "Artifact name for the sanitized plan report"
+        type: string
+        required: false
+        default: "terragrunt-plan-report"
+      retention_days:
+        description: "Artifact retention period"
+        type: number
+        required: false
+        default: 7
+      terraform_version:
+        description: "Terraform version to install"
+        type: string
+        required: false
+        default: "latest"
+      terragrunt_version:
+        description: "Terragrunt version to install"
+        type: string
+        required: false
+        default: "v0.94.0"
+      terragrunt_plan_args:
+        description: "Extra args passed to terragrunt plan"
+        type: string
+        required: false
+        default: ""
+      aws_role_to_assume:
+        description: "Optional AWS role ARN to assume via GitHub OIDC before running plans"
+        type: string
+        required: false
+        default: ""
+      aws_region:
+        description: "AWS region used with aws_role_to_assume"
+        type: string
+        required: false
+        default: ""
+      post_pr_comment:
+        description: "Whether to upsert a PR comment when running on pull_request"
+        type: boolean
+        required: false
+        default: true
+      comment_name:
+        description: "Stable name used for the PR comment"
+        type: string
+        required: false
+        default: "terragrunt-plan-report"
+      markdown_summary_path:
+        description: "Markdown summary output path"
+        type: string
+        required: false
+        default: "out/terragrunt-plan-summary.md"
+      html_summary_path:
+        description: "HTML summary output path"
+        type: string
+        required: false
+        default: "out/terragrunt-plan-summary.html"
+      json_summary_path:
+        description: "JSON summary output path"
+        type: string
+        required: false
+        default: "out/terragrunt-plan-summary.json"
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ inputs.terraform_version }}
+          terraform_wrapper: false
+
+      - name: Setup Terragrunt
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/gruntwork-io/terragrunt/releases/download/${{ inputs.terragrunt_version }}/terragrunt_linux_amd64" \
+            -o /usr/local/bin/terragrunt
+          chmod +x /usr/local/bin/terragrunt
+          terragrunt --version
+
+      - name: Configure AWS credentials
+        if: ${{ inputs.aws_role_to_assume != '' && inputs.aws_region != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.aws_role_to_assume }}
+          aws-region: ${{ inputs.aws_region }}
+          role-session-name: gha-terragrunt-plan
+
+      - name: Run Terragrunt plans
+        shell: bash
+        env:
+          STACK_PATHS: ${{ inputs.stack_paths }}
+        run: |
+          set -euo pipefail
+          raw_dir="$RUNNER_TEMP/terragrunt-plans"
+          mkdir -p "$raw_dir"
+          : > "$raw_dir/index.tsv"
+
+          while IFS= read -r raw_stack_path; do
+            stack_path="$(printf '%s' "$raw_stack_path" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+            [[ -n "$stack_path" ]] || continue
+
+            stack_dir="${{ inputs.terragrunt_working_dir }}/$stack_path"
+            safe_stack="$(printf '%s' "$stack_path" | tr '/:' '__' | tr -c 'A-Za-z0-9._-' '_')"
+            plan_path="$raw_dir/${safe_stack}.tfplan"
+            json_path="$raw_dir/${safe_stack}.json"
+
+            echo "Planning $stack_path"
+
+            (
+              cd "$stack_dir"
+
+              cmd=(terragrunt --non-interactive plan -input=false -no-color -out "$plan_path")
+              if [[ -n "${{ inputs.terragrunt_plan_args }}" ]]; then
+                # shellcheck disable=SC2206
+                extra=(${{ inputs.terragrunt_plan_args }})
+                cmd+=("${extra[@]}")
+              fi
+
+              "${cmd[@]}"
+              terraform show -json "$plan_path" > "$json_path"
+            )
+
+            printf '%s\t%s\t%s\n' "$safe_stack" "$stack_path" "$json_path" >> "$raw_dir/index.tsv"
+          done <<< "$STACK_PATHS"
+
+      - name: Build sanitized plan report
+        uses: ./.github/actions/terragrunt-plan-report
+        with:
+          title: ${{ inputs.report_title }}
+          plan_index_tsv: ${{ runner.temp }}/terragrunt-plans/index.tsv
+          out_json: ${{ inputs.json_summary_path }}
+          out_markdown: ${{ inputs.markdown_summary_path }}
+          out_html: ${{ inputs.html_summary_path }}
+
+      - name: Upload plan report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.report_artifact_name }}
+          path: |
+            ${{ inputs.json_summary_path }}
+            ${{ inputs.markdown_summary_path }}
+            ${{ inputs.html_summary_path }}
+          retention-days: ${{ inputs.retention_days }}
+
+      - name: Attach markdown summary to Step Summary
+        shell: bash
+        run: |
+          cat "${{ inputs.markdown_summary_path }}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment report on PR (upsert)
+        if: ${{ inputs.post_pr_comment && github.event_name == 'pull_request' }}
+        uses: ./.github/actions/comment-pr
+        with:
+          comment_name: ${{ inputs.comment_name }}
+          body_file: ${{ inputs.markdown_summary_path }}
+          token: ${{ secrets.GITHUB_TOKEN }}
