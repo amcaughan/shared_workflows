@@ -23,6 +23,11 @@ on:
         type: string
         required: false
         default: "v0.94.0"
+      run_bash_syntax_check:
+        description: "Run bash -n against tracked .sh files"
+        type: boolean
+        required: false
+        default: true
 
 permissions:
   contents: read
@@ -62,3 +67,20 @@ jobs:
           set -euo pipefail
           cd "${{ inputs.terragrunt_working_dir }}"
           terragrunt hcl format --check
+
+      - name: Bash syntax check
+        if: ${{ inputs.run_bash_syntax_check }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t shell_files < <(git ls-files | grep -E '\.sh$' || true)
+
+          if (( ${#shell_files[@]} == 0 )); then
+            echo "No tracked .sh files found"
+            exit 0
+          fi
+
+          while IFS= read -r shell_file; do
+            [[ -n "$shell_file" ]] || continue
+            bash -n "$shell_file"
+          done < <(printf '%s\n' "${shell_files[@]}" | sort -u)
